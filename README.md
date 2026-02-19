@@ -1,18 +1,38 @@
-## Getting Started
+# QU Microservices Cluster
 
-Welcome to the VS Code Java world. Here is a guideline to help you get started to write Java code in Visual Studio Code.
+## How to Run
 
-## Folder Structure
+Open CMD and navigate to the `src` folder:
+```bash
+cd src
+```
 
-The workspace contains two folders by default, where:
+Compile all files:
+```bash
+javac Server.java Client.java ServiceNode.java
+```
 
-- `src`: the folder to maintain sources
-- `lib`: the folder to maintain dependencies
+Open **3 separate terminal windows** in the `src` folder and run one command per window:
 
-Meanwhile, the compiled output files will be generated in the `bin` folder by default.
+**Terminal 1 — Server:**
+```bash
+java Server
+```
 
-> If you want to customize the folder structure, open `.vscode/settings.json` and update the related settings there.
+**Terminal 2 — Service Node:**
+```bash
+java ServiceNode <SERVER_IP> <PORT> <SERVICE_NAME>
+```
 
-## Dependency Management
+**Terminal 3 — Client:**
+```bash
+java Client <SERVER_IP>
+```
 
-The `JAVA PROJECTS` view allows you to manage your dependencies. More details can be found [here](https://github.com/microsoft/vscode-java-dependency#manage-dependencies).
+**Localhost examples:**
+```bash
+java ServiceNode 127.0.0.1 9100 BASE64
+java Client 127.0.0.1
+```
+
+Once all three are running, use the Client terminal to list available services and send requests.
