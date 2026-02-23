@@ -164,7 +164,7 @@ public class ServiceNode {
     // of this method implementing its specific service.
     //
     // This demo switches on serviceName so you can test multiple services
-    // with the same file — in your real project, split into separate files.
+    // with the same file — in the real project, split into separate files.
     // -------------------------------------------------------------------------
     static String processTask(String input) {
         try {

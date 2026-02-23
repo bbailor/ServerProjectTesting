@@ -35,6 +35,8 @@ public class Server {
 
         // Start UDP heartbeat listener in its own thread
         Thread hbThread = new Thread(Server::heartbeatListener, "HeartbeatThread");
+
+        // Garbage collection and thread management. Background thread
         hbThread.setDaemon(true);
         hbThread.start();
 
