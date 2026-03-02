@@ -1,5 +1,7 @@
 import java.io.*;
 import java.net.*;
+import java.nio.file.*;
+import java.util.Base64;
 import java.util.Scanner;
 
 /**
@@ -41,7 +43,7 @@ public class Client {
         try (
             Socket socket = new Socket(serverIp, SERVER_TCP_PORT);
             PrintWriter    out = new PrintWriter(socket.getOutputStream(), true);
-            BufferedReader in  = new BufferedReader(new InputStreamReader(socket.getInputStream()))
+            BufferedReader in  = new BufferedReader(new InputStreamReader(socket.getInputStream(), "UTF-8"), 1024 * 1024)
         ) {
             System.out.println("[Client] Connected!\n");
 
@@ -100,8 +102,14 @@ public class Client {
     // Request a specific service with user-provided input
     // -------------------------------------------------------------------------
     static void requestService(PrintWriter out, BufferedReader in, Scanner scanner) throws IOException {
-        System.out.print("\nEnter service name (e.g. BASE64, UPPERCASE, REVERSE, WORDCOUNT): ");
+        System.out.print("\nEnter service name (e.g. BASE64, IMAGE, UPPERCASE, REVERSE, WORDCOUNT): ");
         String service = scanner.nextLine().trim().toUpperCase();
+
+        // IMAGE service needs file I/O instead of text input
+        if (service.equals("IMAGE")) {
+            handleImageService(out, in, scanner);
+            return;
+        }
 
         System.out.print("Enter input: ");
         String input = scanner.nextLine().trim();
@@ -126,5 +134,70 @@ public class Client {
             System.out.println("\n>>> Error: " + response.substring(6));
         }
         System.out.println();
+    }
+
+    // -------------------------------------------------------------------------
+    // Image service handler — added to support ImageServiceNode
+    // Prompts for operation, input file path, and output file path
+    // Encodes image to Base64 before sending, decodes result back to a file
+    // -------------------------------------------------------------------------
+    static void handleImageService(PrintWriter out, BufferedReader in, Scanner scanner) throws IOException {
+        System.out.println("\nImage operations: grayscale, thumbnail, rotate:<degrees>, resize:<w>x<h>");
+        System.out.print("Enter operation: ");
+        String operation = scanner.nextLine().trim().toUpperCase();
+
+        System.out.print("Enter input image path (e.g. photo.png): ");
+        String inputPath = scanner.nextLine().trim();
+
+        System.out.print("Enter output image path (e.g. result.png): ");
+        String outputPath = scanner.nextLine().trim();
+
+        // Check the file exists before doing anything
+        File inputFile = new File(inputPath);
+        if (!inputFile.exists()) {
+            System.out.println(">>> Error: File not found: " + inputPath + "\n");
+            return;
+        }
+
+        // Read the image and encode it to Base64 so it can travel over the text protocol
+        System.out.println("[Client] Reading image: " + inputPath);
+        byte[] imageBytes = Files.readAllBytes(inputFile.toPath());
+        String b64Image   = Base64.getEncoder().encodeToString(imageBytes);
+        System.out.println("[Client] Image encoded (" + imageBytes.length + " bytes)");
+
+        // Send: REQUEST|IMAGE|OPERATION:<base64>
+        String request = "REQUEST|IMAGE|" + operation + ":" + b64Image;
+        System.out.println("[Client] Sending image request (operation=" + operation + ")...");
+        out.println(request);
+
+        // Wait for result
+        System.out.println("[Client] Waiting for result...");
+        String response = in.readLine();
+
+        if (response == null) {
+            System.out.println(">>> Error: No response from server.\n");
+            return;
+        }
+
+        if (response.startsWith("RESULT|ERROR|") || response.startsWith("ERROR|")) {
+            String msg = response.startsWith("RESULT|ERROR|")
+                ? response.substring(13)
+                : response.substring(6);
+            System.out.println(">>> Error: " + msg + "\n");
+            return;
+        }
+
+        if (!response.startsWith("RESULT|")) {
+            System.out.println(">>> Unexpected response: " + response + "\n");
+            return;
+        }
+
+        // Decode the result image and save it to the output file
+        String resultB64   = response.substring(7);
+        byte[] resultBytes = Base64.getDecoder().decode(resultB64);
+        Files.write(Paths.get(outputPath), resultBytes);
+
+        System.out.println(">>> Success! Result saved to: " + outputPath);
+        System.out.println(">>> Output size: " + resultBytes.length + " bytes\n");
     }
 }

@@ -40,6 +40,10 @@ public class Server {
         hbThread.setDaemon(true);
         hbThread.start();
 
+        // Start cleanup thread — removes dead nodes every 5 seconds
+        // independent of whether any heartbeats are arriving
+        startCleanupThread();
+
         // Start TCP server — this is the main accept loop
         try (ServerSocket serverSocket = new ServerSocket(TCP_PORT)) {
             System.out.println("[Server] TCP listening on port " + TCP_PORT);
@@ -85,18 +89,36 @@ public class Server {
                     registry.put(serviceName, info);
                     System.out.println("[HeartbeatThread] Registered/refreshed: " + info);
                 }
-
-                // Cleanup dead nodes (haven't heartbeated in 120s)
-                long now = System.currentTimeMillis();
-                registry.entrySet().removeIf(e -> {
-                    boolean dead = (now - e.getValue().lastSeen) > NODE_TIMEOUT_MS;
-                    if (dead) System.out.println("[HeartbeatThread] Node DEAD, removing: " + e.getKey());
-                    return dead;
-                });
             }
         } catch (Exception e) {
             System.err.println("[HeartbeatThread] Error: " + e.getMessage());
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // Cleanup Thread
+    // Runs every 5 seconds and removes any nodes that haven't sent a heartbeat
+    // within NODE_TIMEOUT_MS. This runs independently of the heartbeat listener
+    // so dead nodes are removed even when no heartbeats are arriving.
+    // -------------------------------------------------------------------------
+    static void startCleanupThread() {
+        Thread t = new Thread(() -> {
+            while (true) {
+                try {
+                    Thread.sleep(5_000); // check every 5 seconds
+                    long now = System.currentTimeMillis();
+                    registry.entrySet().removeIf(e -> {
+                        boolean dead = (now - e.getValue().lastSeen) > NODE_TIMEOUT_MS;
+                        if (dead) System.out.println("[Cleanup] Node DEAD, removing: " + e.getKey());
+                        return dead;
+                    });
+                } catch (InterruptedException e) {
+                    break;
+                }
+            }
+        }, "CleanupThread");
+        t.setDaemon(true);
+        t.start();
     }
 
     // -------------------------------------------------------------------------
@@ -126,7 +148,8 @@ public class Server {
                 String line;
                 while ((line = in.readLine()) != null) {
                     line = line.trim();
-                    System.out.println("[ClientThread] From client: " + line);
+                    String logLine = line.length() > 100 ? line.substring(0, 100) + "...[shortened]" : line;
+                    System.out.println("[ClientThread] From client: " + logLine);
 
                     if (line.equals("LIST")) {
                         // Send back all currently alive services
@@ -199,7 +222,8 @@ public class Server {
 
                 // Wait for result from SN:  RESULT|<output>
                 String snResponse = snIn.readLine();
-                System.out.println("[ClientThread] SN responded: " + snResponse);
+                String logResponse = snResponse != null && snResponse.length() > 100 ? snResponse.substring(0, 100) + "...[shortened]" : snResponse;
+                System.out.println("[ClientThread] SN responded: " + logResponse);
 
                 // Forward result back to the client
                 out.println(snResponse);
