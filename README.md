@@ -9,7 +9,7 @@ cd src
 
 Compile all files:
 ```bash
-javac Server.java Client.java ServiceNode.java
+javac Server.java Client.java ServiceNode.java CompressionServiceNode.java ImageServiceNode.java CSVServiceNode.java
 ```
 
 Open **3 separate terminal windows** in the `src` folder and run one command per window:

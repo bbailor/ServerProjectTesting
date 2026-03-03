@@ -111,6 +111,12 @@ public class Client {
             return;
         }
 
+        // COMPRESSION service supporting text and file input
+        if (service.equals("COMPRESSION")) {
+            handleCompressionService(out, in, scanner);
+            return;
+        }
+
         System.out.print("Enter input: ");
         String input = scanner.nextLine().trim();
 
@@ -135,6 +141,140 @@ public class Client {
         }
         System.out.println();
     }
+
+    // ------------------------------------------------
+    // Compression Service Handler
+    // Support for File and String Text Input
+    // Operations: COMPRESS, DECOMPRESS
+    // ------------------------------------------------
+    static void handleCompressionService(PrintWriter out, BufferedReader in, Scanner scanner) throws IOException {
+        System.out.println("\nCompression Opertaions: COMPRESS, DECOPRESS");
+        System.out.print("Enter Operation: ");
+        String operation = scanner.nextLine().trim().toUpperCase();
+
+        if(!operation.equals("COMPRESS") && !operation.equals("DECOMPRESS")) {
+            System.out.println(">>> Error: Invalid operation. Use COMPRESS or DECOMPRESS.\n");
+        }
+
+        System.out.println("\nInput type:");
+        System.out.println("1. Text (enter directly)");
+        System.out.println("2. File (provide file path)");
+        System.out.print("Choice: ");
+        String inputType = scanner.nextLine().trim();
+
+        String inputData;
+        String outputPath = null;
+        boolean isFileInput = false;
+
+        if (inputType.equals("2")) {
+            // File input
+            isFileInput = true;
+            System.out.print("Enter input file path: ");
+            String inputPath = scanner.nextLine().trim();
+
+            System.out.print("Enter output file path: ");
+            outputPath = scanner.nextLine().trim();
+
+            File inputFile = new File(inputPath);
+            if (!inputFile.exists()) {
+                System.out.println(">>> Error: File not found: " + inputPath + "\n");
+                return;
+            }
+
+            // Read file contents
+            byte[] fileBytes = Files.readAllBytes(inputFile.toPath());
+            
+            if (operation.equals("COMPRESS")) {
+                // For compression: encode file bytes as Base64 so they can travel over text protocol
+                // The service will receive this, decode it, compress, and return Base64-encoded compressed data
+                inputData = "FILE:" + Base64.getEncoder().encodeToString(fileBytes);
+            } else {
+                // For decompression: the file should contain Base64-encoded compressed data
+                // Read it as text
+                inputData = new String(fileBytes, "UTF-8").trim();
+            }
+            
+            System.out.println("[Client] File read (" + fileBytes.length + " bytes)");
+        } else {
+            // Text input
+            System.out.print("Enter text: ");
+            inputData = scanner.nextLine();
+
+            if (inputData.isEmpty()) {
+                System.out.println(">>> Error: Input cannot be empty.\n");
+                return;
+            }
+        }
+
+        // Build Request
+        // For DECOMPRESS, we prefix with DECOMPRESS| so the service node knows
+        String payload;
+        if (operation.equals("DECOMPRESS")) {
+            payload = "DECOMPRESS|" + inputData;
+        } else {
+            payload = inputData;
+        }
+
+        String request = "REQUEST|COMPRESSION|" + payload;
+        System.out.println("[Client] Sending compression request (operation=" + operation + ")...");
+        out.println(request);
+
+        // Wait for response
+        System.out.println("[Client] Waiting for result...");
+        String response = in.readLine();
+
+        if (response == null) {
+            System.out.println(">>> Error: No response from server.\n");
+            return;
+        }
+
+        if (response.startsWith("ERROR|") || response.contains("ERROR|")) {
+            String msg = response.startsWith("RESULT|ERROR|")
+                ? response.substring(13)
+                : response.substring(response.indexOf("ERROR|") + 6);
+            System.out.println(">>> Error: " + msg + "\n");
+            return;
+        }
+
+        if (!response.startsWith("RESULT|")) {
+            System.out.println(">>> Unexpected response: " + response + "\n");
+            return;
+        }
+
+        String result = response.substring(7);
+
+        if (isFileInput && outputPath != null) {
+            // Save result to file
+            if (operation.equals("COMPRESS")) {
+                // Result is Base64-encoded compressed data - save as text
+                Files.write(Paths.get(outputPath), result.getBytes("UTF-8"));
+                System.out.println(">>> Success! Compressed data saved to: " + outputPath);
+            } else {
+                // Result is decompressed text - save directly
+                // Check if it was originally a file (Base64 encoded)
+                if (result.startsWith("FILE:")) {
+                    // Decode the Base64 back to original file bytes
+                    byte[] originalBytes = Base64.getDecoder().decode(result.substring(5));
+                    Files.write(Paths.get(outputPath), originalBytes);
+                    System.out.println(">>> Success! Decompressed file saved to: " + outputPath);
+                    System.out.println(">>> Output size: " + originalBytes.length + " bytes");
+                } else {
+                    Files.write(Paths.get(outputPath), result.getBytes("UTF-8"));
+                    System.out.println(">>> Success! Decompressed text saved to: " + outputPath);
+                }
+            }
+        } else {
+            // Display result directly
+            if (operation.equals("COMPRESS")) {
+                System.out.println("\n>>> Compressed (Base64): " + result);
+                System.out.println(">>> (You can use this string to decompress later)");
+            } else {
+                System.out.println("\n>>> Decompressed: " + result);
+            }
+        }
+        System.out.println();
+    }
+
 
     // -------------------------------------------------------------------------
     // Image service handler — added to support ImageServiceNode
