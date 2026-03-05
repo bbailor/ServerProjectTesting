@@ -43,3 +43,10 @@ java Client 127.0.0.1
 - PLACEHOLDER
 
 Once all three are running, use the Client terminal to list available services and send requests.
+
+## Credits
+**Alex Pina**: Programmer
+**Ben Bailor**: Programmer
+**Jackson Sennhenn**: Programmer
+**Tyler Smalley**: Programmer
+
