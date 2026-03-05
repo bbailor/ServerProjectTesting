@@ -35,4 +35,13 @@ java ServiceNode 127.0.0.1 9100 BASE64
 java Client 127.0.0.1
 ```
 
+**Valid Service Names**
+```bash
+java IMAGE
+java COMPRESSION
+java CSV
+java PLACEHOLDER
+java PLACEHOLDER
+```
+
 Once all three are running, use the Client terminal to list available services and send requests.
