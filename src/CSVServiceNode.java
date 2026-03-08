@@ -121,7 +121,6 @@ public class CSVServiceNode {
             BufferedReader in  = new BufferedReader(new InputStreamReader(conn.getInputStream()));
             PrintWriter    out = new PrintWriter(conn.getOutputStream(), true)
         ) {
-            System.out.println("Input format: <value1>,<value2>,...");
             String line = in.readLine();
             if (line == null) return;
 

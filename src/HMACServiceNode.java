@@ -142,9 +142,6 @@ public class HMACServiceNode {
         try (
                 BufferedReader in = new BufferedReader(new InputStreamReader(conn.getInputStream(), "UTF-8"));
                 PrintWriter out = new PrintWriter(new OutputStreamWriter(conn.getOutputStream(), "UTF-8"), true)) {
-           
-            System.out.println("Input format: SIGN|KEY|STRING");
-            System.out.println("-or\t\tVERIFY|KEY|STRING|<paste signature here>");
 
 
             String line = in.readLine();

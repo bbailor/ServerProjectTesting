@@ -179,7 +179,6 @@ public class TopKServiceNode {
             BufferedReader in  = new BufferedReader(new InputStreamReader(conn.getInputStream(),  "UTF-8"));
             PrintWriter    out = new PrintWriter(new OutputStreamWriter(conn.getOutputStream(), "UTF-8"), true)
         ) {
-            System.out.println("Input format: TOPK|<k>|<text> or TFIDF|<k>|<docs>\nSee READ.ME for more information.");
             String line = in.readLine();
             if (line == null) return;
 

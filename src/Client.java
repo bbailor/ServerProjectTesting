@@ -105,6 +105,8 @@ public class Client {
         System.out.print("\nEnter service name: ");
         String service = scanner.nextLine().trim().toUpperCase();
 
+
+
         // IMAGE service needs file I/O instead of text input
         if (service.equals("IMAGE")) {
             handleImageService(out, in, scanner);
@@ -116,6 +118,21 @@ public class Client {
             handleCompressionService(out, in, scanner);
             return;
         }
+
+        // Gives example input for user friendliness
+        if (service.equals("HMAC")) {
+            System.out.println("Input format: SIGN|KEY|STRING");
+            System.out.println("-or\t\tVERIFY|KEY|STRING|<paste signature here>");
+        }
+        if (service.equals("TOPK")) {
+            System.out.println("Input format: TOPK|<k>|<text> or TFIDF|<k>|<docs>\nSee READ.ME for more information.");
+        }
+
+        if (service.equals("CSV")) {
+            System.out.println("Input format: <value1>,<value2>,...");
+
+        }
+
 
         System.out.print("Enter input: ");
         String input = scanner.nextLine().trim();
