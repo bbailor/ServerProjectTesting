@@ -105,7 +105,31 @@ public class Client {
         System.out.print("\nEnter service name: ");
         String service = scanner.nextLine().trim().toUpperCase();
 
+        if (service.isEmpty()) {
+            System.out.println("Service name cannot be empty.\n");
+            return;
+        }
 
+        // Check if service is available before asking for input
+        out.println("LIST");
+        String listResponse = in.readLine();
+        if (listResponse == null || !listResponse.startsWith("SERVICES|")) {
+            System.out.println(">>> Error: Could not retrieve service list.\n");
+            return;
+        }
+        String[] availableServices = listResponse.substring(9).split(",");
+        boolean found = false;
+        for (String s : availableServices) {
+            if (s.trim().equalsIgnoreCase(service)) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            System.out.println(">>> Error: Service '" + service + "' is not currently available.");
+            System.out.println(">>> Type 1 from the menu to see available services.\n");
+            return;
+        }
 
         // IMAGE service needs file I/O instead of text input
         if (service.equals("IMAGE")) {
