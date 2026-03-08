@@ -4,17 +4,15 @@ import java.util.*;
 import java.util.concurrent.*;
 
 /**
- * DEMO SERVER (Controller/Router)
+ * SERVER
  * 
- * Runs on: EC2 Instance 1 (or any machine)
+ * Runs on: EC2 Instance
  * 
  * What this does:
  *   - UDP thread listens for heartbeats from Service Nodes
  *   - TCP thread accepts client connections and spawns a client-thread per client
  *   - Client-thread looks up which SN offers the requested service, forwards the
  *     request to that SN over TCP, and sends the result back to the client
- * 
- * Run: javac Server.java && java Server
  */
 public class Server {
 

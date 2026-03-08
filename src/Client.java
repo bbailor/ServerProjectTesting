@@ -102,7 +102,7 @@ public class Client {
     // Request a specific service with user-provided input
     // -------------------------------------------------------------------------
     static void requestService(PrintWriter out, BufferedReader in, Scanner scanner) throws IOException {
-        System.out.print("\nEnter service name (e.g. BASE64, IMAGE, UPPERCASE, REVERSE, WORDCOUNT): ");
+        System.out.print("\nEnter service name: ");
         String service = scanner.nextLine().trim().toUpperCase();
 
         // IMAGE service needs file I/O instead of text input

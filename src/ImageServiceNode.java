@@ -46,7 +46,7 @@ public class ImageServiceNode {
     static final Random random = new Random();
 
     public static void main(String[] args) throws Exception {
-        if (args.length < 2) {
+        if (args.length != 2) {
             System.out.println("Usage: java ImageServiceNode <serverIp> <myTcpPort>");
             System.out.println("Example: java ImageServiceNode 127.0.0.1 9102");
             System.exit(1);

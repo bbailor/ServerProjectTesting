@@ -26,15 +26,15 @@ public class CompressionServiceNode {
     static final Random random = new Random();
 
     public static void main(String[] args) throws Exception {
-        if (args.length < 3) {
-            System.out.println("Usage: java ServiceNode <serverIp> <myTcpPort> <serviceName>");
-            System.out.println("Example: java ServiceNode 54.123.45.67 9100 BASE64");
+        if (args.length != 2) {
+            System.out.println("Usage: java ServiceNode <serverIp> <myTcpPort>");
+            System.out.println("Example: java ServiceNode 54.123.45.67 9100");
             System.exit(1);
         }
 
         serverIp    = args[0];
         myTcpPort   = Integer.parseInt(args[1]);
-        serviceName = args[2].toUpperCase();
+        serviceName = "COMPRESSION";
         nodeId      = "SN-" + serviceName + "-" + myTcpPort;
 
         System.out.println("[" + nodeId + "] Starting...");

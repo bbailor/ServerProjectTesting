@@ -52,7 +52,7 @@ public class HMACServiceNode {
     static final Random random = new Random();
 
     public static void main(String[] args) throws Exception {
-        if (args.length < 2) {
+        if (args.length != 2) {
             System.out.println("Usage: java HMACServiceNode <serverIp> <myTcpPort>");
             System.out.println("Example: java HMACServiceNode 127.0.0.1 9103");
 
@@ -133,6 +133,11 @@ public class HMACServiceNode {
         try (
                 BufferedReader in = new BufferedReader(new InputStreamReader(conn.getInputStream(), "UTF-8"));
                 PrintWriter out = new PrintWriter(new OutputStreamWriter(conn.getOutputStream(), "UTF-8"), true)) {
+           
+            System.out.println("Input format: SIGN|KEY|STRING");
+            System.out.println("-or\t\tVERIFY|KEY|STRING|<paste signature here>");
+
+
             String line = in.readLine();
             if (line == null)
                 return;
