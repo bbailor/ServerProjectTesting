@@ -103,6 +103,15 @@ public class TopKServiceNode {
         System.out.println("[" + nodeId + "] TCP task port: " + myTcpPort);
         System.out.println("[" + nodeId + "] Stop-word filtering: " + (filterStopWords ? "ON" : "OFF"));
 
+        // Test if port is available before doing anything
+        try (ServerSocket test = new ServerSocket(myTcpPort)) {
+            // Port is free, close the test socket and proceed normally
+        } catch (IOException e) {
+            System.err.println("[" + nodeId + "] ERROR: Port " + myTcpPort + " is already in use. Exiting.");
+            System.exit(1);  // kills everything including the heartbeat thread
+        }
+
+        //confirming port is available
         startHeartbeatSender();
         startTcpListener();
     }

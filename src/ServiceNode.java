@@ -55,10 +55,16 @@ public class ServiceNode {
         System.out.println("[" + nodeId + "] Will send heartbeats to " + serverIp + ":" + serverUdpPort);
         System.out.println("[" + nodeId + "] Listening for tasks on TCP port " + myTcpPort);
 
-        // Start heartbeat sender in background
-        startHeartbeatSender();
+        // Test if port is available before doing anything
+        try (ServerSocket test = new ServerSocket(myTcpPort)) {
+            // Port is free, close the test socket and proceed normally
+        } catch (IOException e) {
+            System.err.println("[" + nodeId + "] ERROR: Port " + myTcpPort + " is already in use. Exiting.");
+            System.exit(1);  // kills everything including the heartbeat thread
+        }
 
-        // Start TCP listener — blocks here accepting task requests from server
+        //start after confirming port is available
+        startHeartbeatSender();
         startTcpListener();
     }
 
