@@ -183,6 +183,12 @@ public class Client {
         if (isFileInput) {
             System.out.print("Enter input file path: ");
             String inputPath = scanner.nextLine().trim();
+
+            //Allows quotes
+            if(inputPath.contains("\"")) {
+                inputPath = inputPath.replaceAll("\"", "");
+            }
+
             System.out.print("Enter output file path: ");
             outputPath = scanner.nextLine().trim();
 
