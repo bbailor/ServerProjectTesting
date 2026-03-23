@@ -41,11 +41,12 @@ public class Client {
 
         // Connect to the server — this TCP connection stays open for the session
         try (
-            Socket socket = new Socket(serverIp, SERVER_TCP_PORT);
-            PrintWriter    out = new PrintWriter(socket.getOutputStream(), true);
-            BufferedReader in  = new BufferedReader(new InputStreamReader(socket.getInputStream(), "UTF-8"), 1024 * 1024)
+            Socket socket = new Socket(serverIp, SERVER_TCP_PORT)
         ) {
-            System.out.println("[Client] Connected!\n");
+            socket.setSoTimeout(180_000);
+            socket.setTcpNoDelay(true);
+            PrintWriter    out = new PrintWriter(socket.getOutputStream(), true);
+            BufferedReader in  = new BufferedReader(new InputStreamReader(socket.getInputStream(), "UTF-8"), 1024 * 1024);
 
             while (true) {
                 System.out.println("=== MENU ===");
@@ -61,7 +62,7 @@ public class Client {
                         listServices(out, in);
                         break;
                     case "2":
-                        requestService(out, in, scanner);
+                        requestService(socket, out, in, scanner);
                         break;
                     case "3":
                         System.out.println("[Client] Disconnecting.");
@@ -101,8 +102,7 @@ public class Client {
     // -------------------------------------------------------------------------
     // Request a specific service with user-provided input
     // -------------------------------------------------------------------------
-    static void requestService(PrintWriter out, BufferedReader in, Scanner scanner) throws IOException {
-        System.out.print("\nEnter service name: ");
+    static void requestService(Socket socket, PrintWriter out, BufferedReader in, Scanner scanner) throws IOException {        System.out.print("\nEnter service name: ");
         String service = scanner.nextLine().trim().toUpperCase();
 
         if (service.isEmpty()) {
@@ -133,13 +133,13 @@ public class Client {
 
         // IMAGE service needs file I/O instead of text input
         if (service.equals("IMAGE")) {
-            handleImageService(out, in, scanner);
+            handleImageService(socket, out, in, scanner);
             return;
         }
 
         // COMPRESSION service supporting text and file input
         if (service.equals("COMPRESSION")) {
-            handleCompressionService(out, in, scanner);
+            handleCompressionService(socket,out, in, scanner);
             return;
         }
 
@@ -166,30 +166,52 @@ public class Client {
             return;
         }
 
-        // Send:  REQUEST|<serviceName>|<input>
-        String request = "REQUEST|" + service + "|" + input;
-        System.out.println("[Client] Sending: " + request);
-        out.println(request);
+        // // Send:  REQUEST|<serviceName>|<input>
+        // String request = "REQUEST|" + service + "|" + input;
+        // System.out.println("[Client] Sending: " + request);
+        // out.println(request);
+
+
+        // Send: REQUEST|<serviceName>|LENGTH then raw bytes
+        byte[] payloadBytes = input.getBytes("UTF-8");
+        OutputStream rawOut = socket.getOutputStream();
+        String header = "REQUEST|" + service + "|" + payloadBytes.length + "\n";
+        rawOut.write(header.getBytes("UTF-8"));
+        rawOut.write(payloadBytes);
+        rawOut.flush();
 
         // Wait for response
-        String response = in.readLine();
-        System.out.println("[Client] Response: " + response);
+        String responseLine = in.readLine();
 
-        if (response != null && response.startsWith("RESULT|")) {
-            System.out.println("\n>>> Result: " + response.substring(7));
-        } else if (response != null && response.startsWith("ERROR|")) {
-            System.out.println("\n>>> Error: " + response.substring(6));
+        if (responseLine == null) {
+            System.out.println(">>> Error: No response from server.\n");
+            return;
         }
+
+        if (responseLine.startsWith("ERROR|")) {
+            System.out.println(">>> Error: " + responseLine.substring(6) + "\n");
+            return;
+        }
+
+        if (!responseLine.startsWith("RESULT|")) {
+            System.out.println(">>> Unexpected response: " + responseLine + "\n");
+            return;
+        }
+
+        long resultLen = Long.parseLong(responseLine.split("\\|")[1]);
+        byte[] resultBytes = new byte[(int) resultLen];
+        DataInputStream rawIn = new DataInputStream(socket.getInputStream());
+        rawIn.readFully(resultBytes);
+        System.out.println("\n>>> Result: " + new String(resultBytes, "UTF-8"));
         System.out.println();
-    }
+            }
 
     // ------------------------------------------------
     // Compression Service Handler
     // Support for File and String Text Input
     // Operations: COMPRESS, DECOMPRESS
     // ------------------------------------------------
-    static void handleCompressionService(PrintWriter out, BufferedReader in, Scanner scanner) throws IOException {
-        System.out.println("\nCompression Opertaions: COMPRESS, DECOPRESS");
+    static void handleCompressionService(Socket socket, PrintWriter out, BufferedReader in, Scanner scanner) throws IOException {        System.out.println("\nCompression Opertaions: COMPRESS, DECOPRESS");
         System.out.print("Enter Operation: ");
         String operation = scanner.nextLine().trim().toUpperCase();
 
@@ -256,33 +278,41 @@ public class Client {
             payload = inputData;
         }
 
-        String request = "REQUEST|COMPRESSION|" + payload;
         System.out.println("[Client] Sending compression request (operation=" + operation + ")...");
-        out.println(request);
+        byte[] payloadBytes = payload.getBytes("UTF-8");
+        OutputStream rawOut = socket.getOutputStream();
+        String header = "REQUEST|COMPRESSION|" + payloadBytes.length + "\n";
+        rawOut.write(header.getBytes("UTF-8"));
+        rawOut.write(payloadBytes);
+        rawOut.flush();
 
         // Wait for response
         System.out.println("[Client] Waiting for result...");
-        String response = in.readLine();
 
-        if (response == null) {
+
+        String responseLine = in.readLine();
+
+        if (responseLine == null) {
             System.out.println(">>> Error: No response from server.\n");
             return;
         }
 
-        if (response.startsWith("ERROR|") || response.contains("ERROR|")) {
-            String msg = response.startsWith("RESULT|ERROR|")
-                ? response.substring(13)
-                : response.substring(response.indexOf("ERROR|") + 6);
-            System.out.println(">>> Error: " + msg + "\n");
+        if (responseLine.startsWith("ERROR|")) {
+            System.out.println(">>> Error: " + responseLine.substring(6) + "\n");
             return;
         }
 
-        if (!response.startsWith("RESULT|")) {
-            System.out.println(">>> Unexpected response: " + response + "\n");
+        if (!responseLine.startsWith("RESULT|")) {
+            System.out.println(">>> Unexpected response: " + responseLine + "\n");
             return;
         }
 
-        String result = response.substring(7);
+        // Read the result bytes
+        long resultLen = Long.parseLong(responseLine.split("\\|")[1]);
+        byte[] resultBytes = new byte[(int) resultLen];
+        DataInputStream rawIn = new DataInputStream(socket.getInputStream());
+        rawIn.readFully(resultBytes);
+        String result = new String(resultBytes, "UTF-8");
 
         if (isFileInput && outputPath != null) {
             // Save result to file
@@ -322,8 +352,7 @@ public class Client {
     // Prompts for operation, input file path, and output file path
     // Encodes image to Base64 before sending, decodes result back to a file
     // -------------------------------------------------------------------------
-    static void handleImageService(PrintWriter out, BufferedReader in, Scanner scanner) throws IOException {
-        System.out.println("\nImage operations: grayscale, thumbnail, rotate:<degrees>, resize:<w>x<h>");
+    static void handleImageService(Socket socket, PrintWriter out, BufferedReader in, Scanner scanner) throws IOException {        System.out.println("\nImage operations: grayscale, thumbnail, rotate:<degrees>, resize:<w>x<h>");
         System.out.print("Enter operation: ");
         String operation = scanner.nextLine().trim().toUpperCase();
 
@@ -347,36 +376,44 @@ public class Client {
         System.out.println("[Client] Image encoded (" + imageBytes.length + " bytes)");
 
         // Send: REQUEST|IMAGE|OPERATION:<base64>
-        String request = "REQUEST|IMAGE|" + operation + ":" + b64Image;
         System.out.println("[Client] Sending image request (operation=" + operation + ")...");
-        out.println(request);
+        String payload = operation + ":" + b64Image;
+        byte[] payloadBytes = payload.getBytes("UTF-8");
+        OutputStream rawOut = socket.getOutputStream();
+        String header = "REQUEST|IMAGE|" + payloadBytes.length + "\n";
+        rawOut.write(header.getBytes("UTF-8"));
+        rawOut.write(payloadBytes);
+        rawOut.flush();
 
         // Wait for result
         System.out.println("[Client] Waiting for result...");
-        String response = in.readLine();
 
-        if (response == null) {
+
+        String responseLine = in.readLine();
+
+        if (responseLine == null) {
             System.out.println(">>> Error: No response from server.\n");
             return;
         }
 
-        if (response.startsWith("RESULT|ERROR|") || response.startsWith("ERROR|")) {
-            String msg = response.startsWith("RESULT|ERROR|")
-                ? response.substring(13)
-                : response.substring(6);
-            System.out.println(">>> Error: " + msg + "\n");
+        if (responseLine.startsWith("ERROR|")) {
+            System.out.println(">>> Error: " + responseLine.substring(6) + "\n");
             return;
         }
 
-        if (!response.startsWith("RESULT|")) {
-            System.out.println(">>> Unexpected response: " + response + "\n");
+        if (!responseLine.startsWith("RESULT|")) {
+            System.out.println(">>> Unexpected response: " + responseLine + "\n");
             return;
         }
 
-        // Decode the result image and save it to the output file
-        String resultB64   = response.substring(7);
-        byte[] resultBytes = Base64.getDecoder().decode(resultB64);
-        Files.write(Paths.get(outputPath), resultBytes);
+        // Read result bytes and decode Base64 image
+        long resultLen = Long.parseLong(responseLine.split("\\|")[1]);
+        byte[] resultBytes = new byte[(int) resultLen];
+        DataInputStream rawIn = new DataInputStream(socket.getInputStream());
+        rawIn.readFully(resultBytes);
+        String resultB64 = new String(resultBytes, "UTF-8");
+        byte[] resultImageBytes = Base64.getDecoder().decode(resultB64);
+        Files.write(Paths.get(outputPath), resultImageBytes);
 
         System.out.println(">>> Success! Result saved to: " + outputPath);
         System.out.println(">>> Output size: " + resultBytes.length + " bytes\n");

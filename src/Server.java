@@ -227,7 +227,7 @@ public class Server {
                 + node.ip + ":" + node.tcpPort);
 
             try (Socket snSocket = new Socket()) {
-                snSocket.connect(new InetSocketAddress(node.ip, node.tcpPort), 10_000);
+                snSocket.connect(new InetSocketAddress(node.ip, node.tcpPort), 30_000);
                 snSocket.setSoTimeout(600_000);
                 snSocket.setTcpNoDelay(true);
 
@@ -243,6 +243,11 @@ public class Server {
                     snOut.write(legacyBytes);
                 } else {
                     streamBytes(clientIn, snOut, dataLen);
+
+snOut.flush();
+System.out.println("[ClientThread] Finished streaming " + dataLen + " bytes to SN");
+
+
                 }
                 snOut.flush();
 
