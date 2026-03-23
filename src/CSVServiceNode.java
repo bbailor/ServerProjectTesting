@@ -26,6 +26,7 @@ public class CSVServiceNode extends ServiceNode {
     String processTask(String input) throws Exception {
         if (input == null || input.trim().isEmpty()) return "ERROR|No input provided";
 
+        long start = System.currentTimeMillis();
         java.util.List<Double> nums = new java.util.ArrayList<>();
         for (String val : input.split("[,\\s\\n\\r]+")) {
             val = val.trim();
@@ -53,6 +54,9 @@ public class CSVServiceNode extends ServiceNode {
         double median = sorted.length % 2 == 0
             ? (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2.0
             : sorted[sorted.length / 2];
+
+        System.out.println("[" + nodeId + "] CSV completed in "
+            + (System.currentTimeMillis() - start) + "ms | values=" + arr.length);
 
         return String.format("Count=%d, Mean=%.2f, Median=%.2f, STD=%.2f, Min=%.2f, Max=%.2f",
             arr.length, mean, median, std, min, max);

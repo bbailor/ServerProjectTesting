@@ -40,7 +40,11 @@ public class HMACServiceNode extends ServiceNode {
             String msg = body.substring(sep + 1);
             if (key.isEmpty()) return "ERROR|Key cannot be empty";
             if (msg.isEmpty())  return "ERROR|Message cannot be empty";
-            return Base64.getEncoder().encodeToString(computeHmac(key, msg));
+            long start = System.currentTimeMillis();
+            String result = Base64.getEncoder().encodeToString(computeHmac(key, msg));
+            System.out.println("[" + nodeId + "] SIGN completed in "
+                + (System.currentTimeMillis() - start) + "ms | msg length=" + msg.length() + " chars");
+            return result;
 
         } else if (input.toUpperCase().startsWith("VERIFY|")) {
             String body     = input.substring(7);
@@ -55,9 +59,13 @@ public class HMACServiceNode extends ServiceNode {
             if (key.isEmpty())       return "ERROR|Key cannot be empty";
             if (message.isEmpty())   return "ERROR|Message cannot be empty";
             if (signature.isEmpty()) return "ERROR|Signature cannot be empty";
+            long start = System.currentTimeMillis();
             byte[] expected = computeHmac(key, message);
             byte[] provided = Base64.getDecoder().decode(signature);
-            return MessageDigest.isEqual(expected, provided) ? "VALID" : "INVALID";
+            boolean valid = MessageDigest.isEqual(expected, provided);
+            System.out.println("[" + nodeId + "] VERIFY completed in "
+                + (System.currentTimeMillis() - start) + "ms | result=" + (valid ? "VALID" : "INVALID"));
+            return valid ? "VALID" : "INVALID";
 
         } else {
             return "ERROR|Use SIGN|<key>|<message> or VERIFY|<key>|<message>|<signature>";

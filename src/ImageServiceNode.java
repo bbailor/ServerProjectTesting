@@ -62,6 +62,7 @@ public class ImageServiceNode extends ServiceNode {
         System.out.println("[" + nodeId + "] Operation: " + operation
             + " on " + formatSize(imageBytes.length));
 
+        long start = System.currentTimeMillis();
         BufferedImage img = decodeImage(imageBytes);
         BufferedImage result;
 
@@ -80,7 +81,13 @@ public class ImageServiceNode extends ServiceNode {
             return ("ERROR|Unknown operation: " + operation).getBytes("UTF-8");
         }
 
-        return encodeImage(result);
+        byte[] output = encodeImage(result);
+        System.out.println("[" + nodeId + "] " + operation + " completed in "
+            + (System.currentTimeMillis() - start) + "ms"
+            + " | " + img.getWidth() + "x" + img.getHeight()
+            + " -> " + result.getWidth() + "x" + result.getHeight()
+            + " | output=" + formatSize(output.length));
+        return output;
     }
 
     static BufferedImage decodeImage(byte[] bytes) throws Exception {

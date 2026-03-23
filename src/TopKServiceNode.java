@@ -99,6 +99,7 @@ public class TopKServiceNode extends ServiceNode {
     // TOPK handler — input (after "TOPK|" stripped): <k>|<text>
     // -------------------------------------------------------------------------
     static String handleTopK(String input) {
+        long start = System.currentTimeMillis();
         int sep = input.indexOf('|');
         if (sep < 0) return "ERROR|Format: TOPK|<k>|<text>";
 
@@ -128,7 +129,8 @@ public class TopKServiceNode extends ServiceNode {
             sb.append(e.getKey()).append(":").append(e.getValue());
         }
 
-        System.out.println("[" + nodeId + "] Top-" + k + " from " + freq.size() + " unique terms");
+        System.out.println("[" + nodeId + "] TOPK completed in "
+            + (System.currentTimeMillis() - start) + "ms | k=" + k + " | unique terms=" + freq.size());
         return sb.toString();
     }
 
@@ -138,6 +140,7 @@ public class TopKServiceNode extends ServiceNode {
     // The client joins multiple file contents with ~~ before sending.
     // -------------------------------------------------------------------------
     static String handleTfIdf(String input) {
+        long start = System.currentTimeMillis();
         int sep = input.indexOf('|');
         if (sep < 0) return "ERROR|Format: TFIDF|<k>|<doc1>~~<doc2>~~...";
 
@@ -202,7 +205,8 @@ public class TopKServiceNode extends ServiceNode {
             sb.append(e.getKey()).append(":").append(String.format("%.4f", e.getValue()));
         }
 
-        System.out.println("[" + nodeId + "] TF-IDF top-" + k + " across " + N + " document(s)");
+        System.out.println("[" + nodeId + "] TFIDF completed in "
+            + (System.currentTimeMillis() - start) + "ms | k=" + k + " | docs=" + N);
         return sb.toString();
     }
 
