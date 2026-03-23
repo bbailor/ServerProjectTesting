@@ -172,7 +172,18 @@ public class Client {
         long   resultLen   = Long.parseLong(responseLine.split("\\|")[1]);
         byte[] resultBytes = new byte[(int) resultLen];
         rawIn.readFully(resultBytes);
+        String result = new String(resultBytes, "UTF-8");
+
         System.out.println("\n>>> Result: " + new String(resultBytes, "UTF-8"));
+        System.out.println();
+
+        // Offer to save the signature to a file after a successful SIGN
+        System.out.print("Save statistics to file? Enter path or press Enter to skip: ");
+        String outPath = scanner.nextLine().trim();
+        if (!outPath.isEmpty()) {
+            Files.write(Paths.get(outPath), result.getBytes("UTF-8"));
+            System.out.println(">>> Statistics saved to: " + outPath);
+        }
         System.out.println();
     }
 
