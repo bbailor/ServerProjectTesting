@@ -5,16 +5,9 @@ import java.util.Base64;
 import java.util.Scanner;
 
 /**
- * DEMO CLIENT
+ * CLIENT
  *
- * Runs on: EC2 Instance 2, or any machine (even your own laptop for testing)
- *
- * What this does:
- *   - Connects to the server over TCP
- *   - Asks the server for a list of available services
- *   - Lets the user pick a service and enter input
- *   - Sends the request to the server, which routes it to the right Service Node
- *   - Displays the result
+ * Runs on: EC2 Instance 2, or any machine
  *
  * Run:
  *   javac Client.java
@@ -25,7 +18,7 @@ import java.util.Scanner;
  */
 public class Client {
 
-    static final int SERVER_TCP_PORT = 9000; // must match Server.TCP_PORT
+    static final int SERVER_TCP_PORT = 9000;
 
     public static void main(String[] args) throws Exception {
         if (args.length < 1) {
@@ -39,14 +32,14 @@ public class Client {
 
         System.out.println("[Client] Connecting to server at " + serverIp + ":" + SERVER_TCP_PORT);
 
-        // Connect to the server — this TCP connection stays open for the session
-        try (
-            Socket socket = new Socket(serverIp, SERVER_TCP_PORT)
-        ) {
-            socket.setSoTimeout(180_000);
+        try (Socket socket = new Socket(serverIp, SERVER_TCP_PORT)) {
+            socket.setSoTimeout(1_800_000); // 30 minutes for large file operations
             socket.setTcpNoDelay(true);
-            PrintWriter    out = new PrintWriter(socket.getOutputStream(), true);
-            BufferedReader in  = new BufferedReader(new InputStreamReader(socket.getInputStream(), "UTF-8"), 1024 * 1024);
+
+            OutputStream rawOut = socket.getOutputStream();
+            InputStream  rawIn  = socket.getInputStream();
+
+            System.out.println("[Client] Connected!\n");
 
             while (true) {
                 System.out.println("=== MENU ===");
@@ -59,10 +52,10 @@ public class Client {
 
                 switch (choice) {
                     case "1":
-                        listServices(out, in);
+                        listServices(rawOut, rawIn);
                         break;
                     case "2":
-                        requestService(socket, out, in, scanner);
+                        requestService(socket, rawOut, rawIn, scanner);
                         break;
                     case "3":
                         System.out.println("[Client] Disconnecting.");
@@ -80,14 +73,14 @@ public class Client {
     // -------------------------------------------------------------------------
     // Ask the server for the current list of alive services
     // -------------------------------------------------------------------------
-    static void listServices(PrintWriter out, BufferedReader in) throws IOException {
+    static void listServices(OutputStream rawOut, InputStream rawIn) throws IOException {
         System.out.println("\n[Client] Requesting service list...");
-        out.println("LIST");
+        writeLine(rawOut, "LIST");
 
-        String response = in.readLine();
+        String response = readLine(rawIn);
         System.out.println("[Client] Server responded: " + response);
 
-        if (response.startsWith("SERVICES|")) {
+        if (response != null && response.startsWith("SERVICES|")) {
             String[] services = response.substring(9).split(",");
             System.out.println("\nAvailable services:");
             for (String s : services) {
@@ -102,7 +95,8 @@ public class Client {
     // -------------------------------------------------------------------------
     // Request a specific service with user-provided input
     // -------------------------------------------------------------------------
-    static void requestService(Socket socket, PrintWriter out, BufferedReader in, Scanner scanner) throws IOException {        System.out.print("\nEnter service name: ");
+    static void requestService(Socket socket, OutputStream rawOut, InputStream rawIn, Scanner scanner) throws IOException {
+        System.out.print("\nEnter service name: ");
         String service = scanner.nextLine().trim().toUpperCase();
 
         if (service.isEmpty()) {
@@ -111,8 +105,8 @@ public class Client {
         }
 
         // Check if service is available before asking for input
-        out.println("LIST");
-        String listResponse = in.readLine();
+        writeLine(rawOut, "LIST");
+        String listResponse = readLine(rawIn);
         if (listResponse == null || !listResponse.startsWith("SERVICES|")) {
             System.out.println(">>> Error: Could not retrieve service list.\n");
             return;
@@ -131,32 +125,29 @@ public class Client {
             return;
         }
 
-        // IMAGE service needs file I/O instead of text input
+        // Route to specific handlers for services that need special input handling
         if (service.equals("IMAGE")) {
-            handleImageService(socket, out, in, scanner);
+            handleImageService(rawOut, rawIn, scanner);
             return;
         }
 
-        // COMPRESSION service supporting text and file input
         if (service.equals("COMPRESSION")) {
-            handleCompressionService(socket,out, in, scanner);
+            handleCompressionService(rawOut, rawIn, scanner);
             return;
         }
 
-        // Gives example input for user friendliness
+        // Show input format hints for each service
         if (service.equals("HMAC")) {
             System.out.println("Input format: SIGN|KEY|STRING");
-            System.out.println("-or\t\tVERIFY|KEY|STRING|<paste signature here>");
+            System.out.println("          or: VERIFY|KEY|STRING|<paste signature here>");
         }
         if (service.equals("TOPK")) {
-            System.out.println("Input format: TOPK|<k>|<text> or TFIDF|<k>|<docs>\nSee READ.ME for more information.");
+            System.out.println("Input format: TOPK|<k>|<text>");
+            System.out.println("          or: TFIDF|<k>|<doc1>~~<doc2>~~...");
         }
-
         if (service.equals("CSV")) {
-            System.out.println("Input format: <value1>,<value2>,...");
-
+            System.out.println("Input format: <value1>,<value2>,<value3>,...");
         }
-
 
         System.out.print("Enter input: ");
         String input = scanner.nextLine().trim();
@@ -166,33 +157,23 @@ public class Client {
             return;
         }
 
-        // // Send:  REQUEST|<serviceName>|<input>
-        // String request = "REQUEST|" + service + "|" + input;
-        // System.out.println("[Client] Sending: " + request);
-        // out.println(request);
-
-
-        // Send: REQUEST|<serviceName>|LENGTH then raw bytes
+        // Send: REQUEST|SERVICE|LENGTH\n<raw bytes>
         byte[] payloadBytes = input.getBytes("UTF-8");
-        OutputStream rawOut = socket.getOutputStream();
-        String header = "REQUEST|" + service + "|" + payloadBytes.length + "\n";
-        rawOut.write(header.getBytes("UTF-8"));
+        writeLine(rawOut, "REQUEST|" + service + "|" + payloadBytes.length);
         rawOut.write(payloadBytes);
         rawOut.flush();
 
-        // Wait for response
-        String responseLine = in.readLine();
+        // Read response: RESULT|LENGTH\n<raw bytes>
+        String responseLine = readLine(rawIn);
 
         if (responseLine == null) {
             System.out.println(">>> Error: No response from server.\n");
             return;
         }
-
         if (responseLine.startsWith("ERROR|")) {
             System.out.println(">>> Error: " + responseLine.substring(6) + "\n");
             return;
         }
-
         if (!responseLine.startsWith("RESULT|")) {
             System.out.println(">>> Unexpected response: " + responseLine + "\n");
             return;
@@ -200,23 +181,23 @@ public class Client {
 
         long resultLen = Long.parseLong(responseLine.split("\\|")[1]);
         byte[] resultBytes = new byte[(int) resultLen];
-        DataInputStream rawIn = new DataInputStream(socket.getInputStream());
-        rawIn.readFully(resultBytes);
+        new DataInputStream(rawIn).readFully(resultBytes);
         System.out.println("\n>>> Result: " + new String(resultBytes, "UTF-8"));
         System.out.println();
-            }
+    }
 
-    // ------------------------------------------------
+    // -------------------------------------------------------------------------
     // Compression Service Handler
-    // Support for File and String Text Input
-    // Operations: COMPRESS, DECOMPRESS
-    // ------------------------------------------------
-    static void handleCompressionService(Socket socket, PrintWriter out, BufferedReader in, Scanner scanner) throws IOException {        System.out.println("\nCompression Opertaions: COMPRESS, DECOPRESS");
+    // Supports COMPRESS and DECOMPRESS on both text and files
+    // -------------------------------------------------------------------------
+    static void handleCompressionService(OutputStream rawOut, InputStream rawIn, Scanner scanner) throws IOException {
+        System.out.println("\nCompression Operations: COMPRESS, DECOMPRESS");
         System.out.print("Enter Operation: ");
         String operation = scanner.nextLine().trim().toUpperCase();
 
-        if(!operation.equals("COMPRESS") && !operation.equals("DECOMPRESS")) {
+        if (!operation.equals("COMPRESS") && !operation.equals("DECOMPRESS")) {
             System.out.println(">>> Error: Invalid operation. Use COMPRESS or DECOMPRESS.\n");
+            return;
         }
 
         System.out.println("\nInput type:");
@@ -230,7 +211,6 @@ public class Client {
         boolean isFileInput = false;
 
         if (inputType.equals("2")) {
-            // File input
             isFileInput = true;
             System.out.print("Enter input file path: ");
             String inputPath = scanner.nextLine().trim();
@@ -244,22 +224,16 @@ public class Client {
                 return;
             }
 
-            // Read file contents
             byte[] fileBytes = Files.readAllBytes(inputFile.toPath());
-            
+
             if (operation.equals("COMPRESS")) {
-                // For compression: encode file bytes as Base64 so they can travel over text protocol
-                // The service will receive this, decode it, compress, and return Base64-encoded compressed data
                 inputData = "FILE:" + Base64.getEncoder().encodeToString(fileBytes);
             } else {
-                // For decompression: the file should contain Base64-encoded compressed data
-                // Read it as text
                 inputData = new String(fileBytes, "UTF-8").trim();
             }
-            
+
             System.out.println("[Client] File read (" + fileBytes.length + " bytes)");
         } else {
-            // Text input
             System.out.print("Enter text: ");
             inputData = scanner.nextLine();
 
@@ -269,62 +243,47 @@ public class Client {
             }
         }
 
-        // Build Request
-        // For DECOMPRESS, we prefix with DECOMPRESS| so the service node knows
-        String payload;
-        if (operation.equals("DECOMPRESS")) {
-            payload = "DECOMPRESS|" + inputData;
-        } else {
-            payload = inputData;
-        }
+        // Build payload
+        String payload = operation.equals("DECOMPRESS") ? "DECOMPRESS|" + inputData : inputData;
 
         System.out.println("[Client] Sending compression request (operation=" + operation + ")...");
         byte[] payloadBytes = payload.getBytes("UTF-8");
-        OutputStream rawOut = socket.getOutputStream();
-        String header = "REQUEST|COMPRESSION|" + payloadBytes.length + "\n";
-        rawOut.write(header.getBytes("UTF-8"));
+        System.out.println("[Client] Payload length: " + payloadBytes.length + " bytes");
+
+        // Send: REQUEST|COMPRESSION|LENGTH\n<raw bytes>
+        writeLine(rawOut, "REQUEST|COMPRESSION|" + payloadBytes.length);
         rawOut.write(payloadBytes);
         rawOut.flush();
+        System.out.println("[Client] Sent " + payloadBytes.length + " bytes");
 
-        // Wait for response
         System.out.println("[Client] Waiting for result...");
 
-
-        String responseLine = in.readLine();
+        String responseLine = readLine(rawIn);
 
         if (responseLine == null) {
             System.out.println(">>> Error: No response from server.\n");
             return;
         }
-
         if (responseLine.startsWith("ERROR|")) {
             System.out.println(">>> Error: " + responseLine.substring(6) + "\n");
             return;
         }
-
         if (!responseLine.startsWith("RESULT|")) {
             System.out.println(">>> Unexpected response: " + responseLine + "\n");
             return;
         }
 
-        // Read the result bytes
         long resultLen = Long.parseLong(responseLine.split("\\|")[1]);
         byte[] resultBytes = new byte[(int) resultLen];
-        DataInputStream rawIn = new DataInputStream(socket.getInputStream());
-        rawIn.readFully(resultBytes);
+        new DataInputStream(rawIn).readFully(resultBytes);
         String result = new String(resultBytes, "UTF-8");
 
         if (isFileInput && outputPath != null) {
-            // Save result to file
             if (operation.equals("COMPRESS")) {
-                // Result is Base64-encoded compressed data - save as text
                 Files.write(Paths.get(outputPath), result.getBytes("UTF-8"));
                 System.out.println(">>> Success! Compressed data saved to: " + outputPath);
             } else {
-                // Result is decompressed text - save directly
-                // Check if it was originally a file (Base64 encoded)
                 if (result.startsWith("FILE:")) {
-                    // Decode the Base64 back to original file bytes
                     byte[] originalBytes = Base64.getDecoder().decode(result.substring(5));
                     Files.write(Paths.get(outputPath), originalBytes);
                     System.out.println(">>> Success! Decompressed file saved to: " + outputPath);
@@ -335,10 +294,9 @@ public class Client {
                 }
             }
         } else {
-            // Display result directly
             if (operation.equals("COMPRESS")) {
                 System.out.println("\n>>> Compressed (Base64): " + result);
-                System.out.println(">>> (You can use this string to decompress later)");
+                System.out.println(">>> (Use this string with DECOMPRESS to restore the original)");
             } else {
                 System.out.println("\n>>> Decompressed: " + result);
             }
@@ -346,13 +304,13 @@ public class Client {
         System.out.println();
     }
 
-
     // -------------------------------------------------------------------------
-    // Image service handler — added to support ImageServiceNode
-    // Prompts for operation, input file path, and output file path
+    // Image Service Handler
+    // Prompts for operation, input file, and output file
     // Encodes image to Base64 before sending, decodes result back to a file
     // -------------------------------------------------------------------------
-    static void handleImageService(Socket socket, PrintWriter out, BufferedReader in, Scanner scanner) throws IOException {        System.out.println("\nImage operations: grayscale, thumbnail, rotate:<degrees>, resize:<w>x<h>");
+    static void handleImageService(OutputStream rawOut, InputStream rawIn, Scanner scanner) throws IOException {
+        System.out.println("\nImage operations: GRAYSCALE, THUMBNAIL, ROTATE:<degrees>, RESIZE:<w>x<h>");
         System.out.print("Enter operation: ");
         String operation = scanner.nextLine().trim().toUpperCase();
 
@@ -362,60 +320,71 @@ public class Client {
         System.out.print("Enter output image path (e.g. result.png): ");
         String outputPath = scanner.nextLine().trim();
 
-        // Check the file exists before doing anything
         File inputFile = new File(inputPath);
         if (!inputFile.exists()) {
             System.out.println(">>> Error: File not found: " + inputPath + "\n");
             return;
         }
 
-        // Read the image and encode it to Base64 so it can travel over the text protocol
         System.out.println("[Client] Reading image: " + inputPath);
         byte[] imageBytes = Files.readAllBytes(inputFile.toPath());
         String b64Image   = Base64.getEncoder().encodeToString(imageBytes);
         System.out.println("[Client] Image encoded (" + imageBytes.length + " bytes)");
 
-        // Send: REQUEST|IMAGE|OPERATION:<base64>
-        System.out.println("[Client] Sending image request (operation=" + operation + ")...");
-        String payload = operation + ":" + b64Image;
+        String payload      = operation + ":" + b64Image;
         byte[] payloadBytes = payload.getBytes("UTF-8");
-        OutputStream rawOut = socket.getOutputStream();
-        String header = "REQUEST|IMAGE|" + payloadBytes.length + "\n";
-        rawOut.write(header.getBytes("UTF-8"));
+
+        System.out.println("[Client] Sending image request (operation=" + operation + ")...");
+
+        // Send: REQUEST|IMAGE|LENGTH\n<raw bytes>
+        writeLine(rawOut, "REQUEST|IMAGE|" + payloadBytes.length);
         rawOut.write(payloadBytes);
         rawOut.flush();
 
-        // Wait for result
         System.out.println("[Client] Waiting for result...");
 
-
-        String responseLine = in.readLine();
+        String responseLine = readLine(rawIn);
 
         if (responseLine == null) {
             System.out.println(">>> Error: No response from server.\n");
             return;
         }
-
         if (responseLine.startsWith("ERROR|")) {
             System.out.println(">>> Error: " + responseLine.substring(6) + "\n");
             return;
         }
-
         if (!responseLine.startsWith("RESULT|")) {
             System.out.println(">>> Unexpected response: " + responseLine + "\n");
             return;
         }
 
-        // Read result bytes and decode Base64 image
         long resultLen = Long.parseLong(responseLine.split("\\|")[1]);
         byte[] resultBytes = new byte[(int) resultLen];
-        DataInputStream rawIn = new DataInputStream(socket.getInputStream());
-        rawIn.readFully(resultBytes);
-        String resultB64 = new String(resultBytes, "UTF-8");
+        new DataInputStream(rawIn).readFully(resultBytes);
+        String resultB64        = new String(resultBytes, "UTF-8");
         byte[] resultImageBytes = Base64.getDecoder().decode(resultB64);
         Files.write(Paths.get(outputPath), resultImageBytes);
 
         System.out.println(">>> Success! Result saved to: " + outputPath);
-        System.out.println(">>> Output size: " + resultBytes.length + " bytes\n");
+        System.out.println(">>> Output size: " + resultImageBytes.length + " bytes\n");
+    }
+
+    // -------------------------------------------------------------------------
+    // Utilities — same pattern as Server and ServiceNode
+    // -------------------------------------------------------------------------
+    static String readLine(InputStream in) throws IOException {
+        ByteArrayOutputStream line = new ByteArrayOutputStream();
+        int b;
+        while ((b = in.read()) != -1) {
+            if (b == '\n') break;
+            if (b != '\r') line.write(b);
+        }
+        if (b == -1 && line.size() == 0) return null;
+        return line.toString("UTF-8");
+    }
+
+    static void writeLine(OutputStream out, String s) throws IOException {
+        out.write((s + "\n").getBytes("UTF-8"));
+        out.flush();
     }
 }

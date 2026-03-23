@@ -47,6 +47,7 @@ public class Server {
 
         // Start TCP server — this is the main accept loop
         try (ServerSocket serverSocket = new ServerSocket(TCP_PORT)) {
+            serverSocket.setReceiveBufferSize(1024 * 1024);
             System.out.println("[Server] TCP listening on port " + TCP_PORT);
             while (true) {
                 Socket clientSocket = serverSocket.accept();
@@ -142,6 +143,9 @@ public class Server {
             try {
                 socket.setSoTimeout(600_000);
                 socket.setTcpNoDelay(true);
+
+                socket.setReceiveBufferSize(1024 * 1024); // add this
+                socket.setSendBufferSize(1024 * 1024);    // add this
 
                 InputStream  rawIn  = socket.getInputStream();
                 OutputStream rawOut = socket.getOutputStream();

@@ -134,6 +134,8 @@ public abstract class ServiceNode {
             System.out.println("[" + nodeId + "] Ready and waiting for tasks...\n");
             while (true) {
                 Socket conn = serverSocket.accept();
+                conn.setReceiveBufferSize(1024 * 1024);
+                conn.setSendBufferSize(1024 * 1024);
                 System.out.println("[" + nodeId + "] Connection from: "
                     + conn.getInetAddress().getHostAddress());
                 threadPool.submit(() -> handleTask(conn));
@@ -192,6 +194,8 @@ public abstract class ServiceNode {
                 baos.write(buf, 0, read);
                 remaining -= read;
             }
+
+            System.out.println("[" + nodeId + "] Finished receiving all bytes");
 
             String input = baos.toString("UTF-8");
             System.out.println("[" + nodeId + "] Processing...");
