@@ -169,7 +169,12 @@ public abstract class ServiceNode {
 
             System.out.println("[" + nodeId + "] Received in "
                 + (System.currentTimeMillis() - receiveStart) + "ms");
-            System.out.println("[" + nodeId + "] Processing...");
+
+            // Extract operation name from the payload for logging
+            // For text services: first token before '|' is the operation (e.g. SIGN, VERIFY, TOPK)
+            // For binary services: first line before '\n' is the operation (e.g. GRAYSCALE, ROTATE:90)
+            String operation = extractOperation(inputBytes);
+            System.out.println("[" + nodeId + "] Processing... | operation=" + operation);
 
             long   processStart = System.currentTimeMillis();
             byte[] resultBytes;
@@ -232,6 +237,44 @@ public abstract class ServiceNode {
     static void writeLine(DataOutputStream out, String s) throws IOException {
         out.write((s + "\n").getBytes("UTF-8"));
         out.flush();
+    }
+
+    /**
+     * Extracts the operation name from the raw input bytes for logging.
+     * Text services (HMAC, CSV, TOPK): reads up to the first '|' or end of input.
+     * Binary services (IMAGE): reads the first line up to '\n'.
+     * Caps at 20 chars so large payloads don't flood the log.
+     */
+    
+    static String extractOperation(byte[] inputBytes) {
+        if (inputBytes == null || inputBytes.length == 0) return "unknown";
+        try {
+
+            // Read up to 64 bytes to find the operation name
+
+            int len = Math.min(inputBytes.length, 64);
+            String preview = new String(inputBytes, 0, len, "UTF-8");
+
+            // Binary services send operation on first line before '\n'
+
+            int newline = preview.indexOf('\n');
+            if (newline > 0 && newline < 20) {
+                return preview.substring(0, newline).trim();
+            }
+
+            // Text services send operation before first '|'
+
+            int pipe = preview.indexOf('|');
+            if (pipe > 0) {
+                return preview.substring(0, pipe).trim();
+            }
+
+            // Fallback — just show first 20 chars
+
+            return preview.substring(0, Math.min(20, preview.length())).trim();
+        } catch (Exception e) {
+            return "unknown";
+        }
     }
 
     static String formatSize(long b) {
