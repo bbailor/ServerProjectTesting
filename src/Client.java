@@ -184,7 +184,7 @@ public class Client {
     //         saved to a file so VERIFY can load it later.
     //
     // VERIFY: key typed. Message read from file (same extraction).
-    //         Signature either pasted directly or loaded from a file.
+    //         Signature loaded from a file.
     // -------------------------------------------------------------------------
     static void handleHMAC(DataOutputStream rawOut, DataInputStream rawIn, Scanner scanner) throws IOException {
         System.out.println("\n--- HMAC Sign/Verify ---");
@@ -218,29 +218,19 @@ public class Client {
             payload = "SIGN|" + key + "|" + message;
         } else {
             // VERIFY — get the signature (paste or load from file)
-            System.out.println("Signature options:");
-            System.out.println("  1. Paste signature directly");
-            System.out.println("  2. Load from file");
-            System.out.print("Choice: ");
-            String sigChoice = scanner.nextLine().trim();
-
             String signature;
-            if (sigChoice.equals("2")) {
-                System.out.print("Enter signature file path: ");
-                String sigPath = stripQuotes(scanner.nextLine().trim());
-                File sigFile = new File(sigPath);
-                if (!sigFile.exists()) {
-                    System.out.println(">>> Error: File not found: " + sigPath + "\n");
-                    return;
-                }
-                // Signature is plain Base64 — read raw bytes, no text extraction
-                signature = new String(Files.readAllBytes(sigFile.toPath()), "UTF-8").trim();
-                System.out.println("[Client] Signature loaded from: " + sigPath);
-            } else {
-                System.out.print("Paste signature: ");
-                signature = scanner.nextLine().trim();
-                if (signature.isEmpty()) { System.out.println(">>> Error: Signature cannot be empty.\n"); return; }
+            
+            System.out.print("Enter signature file path: ");
+            String sigPath = stripQuotes(scanner.nextLine().trim());
+            File sigFile = new File(sigPath);
+            if (!sigFile.exists()) {
+                System.out.println(">>> Error: File not found: " + sigPath + "\n");
+                return;
             }
+            // Signature is plain Base64 — read raw bytes, no text extraction
+            signature = new String(Files.readAllBytes(sigFile.toPath()), "UTF-8").trim();
+            System.out.println("[Client] Signature loaded from: " + sigPath);
+            
             payload = "VERIFY|" + key + "|" + message + "|" + signature;
         }
 
