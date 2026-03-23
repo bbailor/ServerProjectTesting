@@ -7,57 +7,31 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 /**
- * SERVICE NODE
+ * SERVICE NODE (Abstract Base Class)
  *
- * Parent class for all service nodes in the QU Microservices Cluster.
+ * All service nodes extend this class.
  *
- * Handles all shared functionality:
- *   - UDP heartbeat sender (random 15-30 second intervals)
- *   - TCP task listener with thread pool
- *   - New length-prefixed binary protocol (TASK|LENGTH\n<bytes>)
- *   - Port availability check
- *   - Socket timeout management
- *   - readLine / writeLine / streamBytes utilities
+ * Protocol:
+ *   Server sends:   TASK|LENGTH\n<raw bytes>
+ *   Node replies:   RESULT|LENGTH\n<raw bytes>
+ *   On error:       ERROR|<reason>\n
  *
- * Each service node only needs to:
- *   1. Set serverIp, myTcpPort, serviceName in main()
- *   2. Call init() at the end of main()
- *   3. Implement processTask(String input)
- *
- * Example subclass:
- *
- *   public class CSVServiceNode extends ServiceNode {
- *       public static void main(String[] args) throws Exception {
- *           if (args.length < 2) { ... }
- *           serverIp    = args[0];
- *           myTcpPort   = Integer.parseInt(args[1]);
- *           serviceName = "CSV";
- *           new CSVServiceNode().init();
- *       }
- *
- *       @Override
- *       String processTask(String input) {
- *           // CSV logic here
- *       }
- *   }
+ * IMPORTANT: Uses DataInputStream throughout — never mix with
+ * BufferedInputStream or bytes will be silently consumed.
  */
 public abstract class ServiceNode {
 
-    // =========================================================================
-    // SHARED STATE — set by each subclass in main() before calling init()
-    // =========================================================================
     static String serverIp;
-    static int    serverUdpPort = 9001;  // must match Server.UDP_HB_PORT
+    static int    serverUdpPort = 9001;
     static int    myTcpPort;
     static String serviceName;
     static String nodeId;
 
-    // Thread pool — 8 threads handles up to 8 simultaneous clients
     static final ExecutorService threadPool = Executors.newFixedThreadPool(8);
-    static final Random random = new Random();
+    static final Random          random     = new Random();
 
     // =========================================================================
-    // INIT — call this at the end of main() in each subclass
+    // INIT
     // =========================================================================
     void init() throws Exception {
         nodeId = "SN-" + serviceName + "-" + myTcpPort;
@@ -65,32 +39,43 @@ public abstract class ServiceNode {
         System.out.println("===========================================");
         System.out.println("   SERVICE NODE: " + serviceName);
         System.out.println("===========================================");
-        System.out.println("[" + nodeId + "] Server:    " + serverIp + ":" + serverUdpPort);
-        System.out.println("[" + nodeId + "] TCP Port:  " + myTcpPort);
-        System.out.println("[" + nodeId + "] Threads:   8");
+        System.out.println("[" + nodeId + "] Server:   " + serverIp + ":" + serverUdpPort);
+        System.out.println("[" + nodeId + "] TCP Port: " + myTcpPort);
+        System.out.println("[" + nodeId + "] Threads:  8");
         System.out.println();
 
-        // Check port is free before starting anything
         try (ServerSocket test = new ServerSocket(myTcpPort)) {
             System.out.println("[" + nodeId + "] Port " + myTcpPort + " is available.");
         } catch (IOException e) {
-            System.err.println("[" + nodeId + "] ERROR: Port " + myTcpPort + " is already in use. Exiting.");
+            System.err.println("[" + nodeId + "] ERROR: Port " + myTcpPort + " already in use. Exiting.");
             System.exit(1);
         }
 
-        // Start heartbeat sender then TCP listener
         startHeartbeatSender();
         startTcpListener();
     }
 
     // =========================================================================
-    // ABSTRACT METHOD — implement this in each subclass with service logic
+    // ABSTRACT METHODS
     // =========================================================================
-    abstract String processTask(String input) throws Exception;
+
+    /** Override for text-based services (CSV, HMAC, TOPK) */
+    String processTask(String input) throws Exception {
+        throw new UnsupportedOperationException("processTask not implemented");
+    }
+
+    /** Override for binary services (COMPRESSION, IMAGE) */
+    byte[] processBytes(byte[] inputBytes) throws Exception {
+        String input  = new String(inputBytes, "UTF-8");
+        String result = processTask(input);
+        return result.getBytes("UTF-8");
+    }
+
+    /** Return true in binary service nodes (COMPRESSION, IMAGE) */
+    boolean isBinaryService() { return false; }
 
     // =========================================================================
-    // UDP HEARTBEAT SENDER
-    // Sends HEARTBEAT|nodeId|serviceName|tcpPort to server every 15-30 seconds
+    // HEARTBEAT
     // =========================================================================
     void startHeartbeatSender() {
         ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
@@ -98,14 +83,12 @@ public abstract class ServiceNode {
             t.setDaemon(true);
             return t;
         });
-
-        // Send immediately on startup so server registers this node right away
         scheduler.execute(this::sendHeartbeat);
         scheduleNextHeartbeat(scheduler);
     }
 
     void scheduleNextHeartbeat(ScheduledExecutorService scheduler) {
-        int delay = 15 + random.nextInt(16); // random 15-30 seconds
+        int delay = 15 + random.nextInt(16);
         scheduler.schedule(() -> {
             sendHeartbeat();
             scheduleNextHeartbeat(scheduler);
@@ -121,16 +104,15 @@ public abstract class ServiceNode {
             System.out.println("[" + nodeId + "] Heartbeat sent");
         } catch (Exception e) {
             System.err.println("[" + nodeId + "] Heartbeat failed: " + e.getMessage());
-            // Do not crash — will retry on next scheduled heartbeat
         }
     }
 
     // =========================================================================
-    // TCP TASK LISTENER
-    // Accepts connections from the server and submits each to the thread pool
+    // TCP LISTENER
     // =========================================================================
     void startTcpListener() throws Exception {
         try (ServerSocket serverSocket = new ServerSocket(myTcpPort)) {
+            serverSocket.setReceiveBufferSize(1024 * 1024);
             System.out.println("[" + nodeId + "] Ready and waiting for tasks...\n");
             while (true) {
                 Socket conn = serverSocket.accept();
@@ -146,20 +128,20 @@ public abstract class ServiceNode {
     // =========================================================================
     // TASK HANDLER
     //
-    // New length-prefixed protocol:
-    //   Server sends:   TASK|LENGTH\n<raw bytes>
-    //   Node replies:   RESULT|LENGTH\n<raw bytes>
-    //   On error:       ERROR|<reason>\n
+    // Uses DataInputStream for ALL reads — never BufferedInputStream.
+    // This is critical to prevent bytes being silently consumed by a buffer
+    // when switching between line reading and byte reading.
     // =========================================================================
     void handleTask(Socket conn) {
         try {
-            conn.setSoTimeout(1_800_000); // 30 minute timeout for large files
+            conn.setSoTimeout(1_800_000);
             conn.setTcpNoDelay(true);
 
-            InputStream  rawIn  = conn.getInputStream();
-            OutputStream rawOut = conn.getOutputStream();
+            // IMPORTANT: Use DataInputStream for everything — one instance only
+            DataInputStream  rawIn  = new DataInputStream(conn.getInputStream());
+            DataOutputStream rawOut = new DataOutputStream(conn.getOutputStream());
 
-            // Read header: TASK|LENGTH
+            // Read header line: TASK|LENGTH
             String header = readLine(rawIn);
             if (header == null) return;
 
@@ -167,47 +149,43 @@ public abstract class ServiceNode {
 
             if (!header.startsWith("TASK|")) {
                 writeLine(rawOut, "ERROR|Expected TASK|LENGTH");
-                rawOut.flush();
                 return;
             }
 
-            // Parse data length
             long dataLen;
             try {
                 dataLen = Long.parseLong(header.split("\\|")[1].trim());
             } catch (NumberFormatException e) {
-                writeLine(rawOut, "ERROR|Invalid length in header: " + header);
-                rawOut.flush();
+                writeLine(rawOut, "ERROR|Invalid length: " + header);
                 return;
             }
 
             System.out.println("[" + nodeId + "] Receiving " + formatSize(dataLen) + "...");
+            long receiveStart = System.currentTimeMillis();
 
-            // Read exactly dataLen bytes
-            ByteArrayOutputStream baos = new ByteArrayOutputStream();
-            byte[] buf = new byte[64 * 1024]; // 64KB chunks
-            long remaining = dataLen;
-            while (remaining > 0) {
-                int toRead = (int) Math.min(buf.length, remaining);
-                int read   = rawIn.read(buf, 0, toRead);
-                if (read == -1) throw new EOFException("Stream ended early");
-                baos.write(buf, 0, read);
-                remaining -= read;
-            }
+            // Read exactly dataLen bytes using readFully — guarantees all bytes arrive
+            byte[] inputBytes = new byte[(int) dataLen];
+            rawIn.readFully(inputBytes);
 
-            System.out.println("[" + nodeId + "] Finished receiving all bytes");
-
-            String input = baos.toString("UTF-8");
+            System.out.println("[" + nodeId + "] Received in "
+                + (System.currentTimeMillis() - receiveStart) + "ms");
             System.out.println("[" + nodeId + "] Processing...");
 
-            long startTime = System.currentTimeMillis();
-            String result  = processTask(input);
-            long elapsed   = System.currentTimeMillis() - startTime;
+            long   processStart = System.currentTimeMillis();
+            byte[] resultBytes;
 
-            System.out.println("[" + nodeId + "] Processed in " + elapsed + "ms");
+            if (isBinaryService()) {
+                resultBytes = processBytes(inputBytes);
+            } else {
+                String input  = new String(inputBytes, "UTF-8");
+                String result = processTask(input);
+                resultBytes   = result.getBytes("UTF-8");
+            }
 
-            // Send back RESULT|LENGTH\n<bytes>
-            byte[] resultBytes = result.getBytes("UTF-8");
+            System.out.println("[" + nodeId + "] Processed in "
+                + (System.currentTimeMillis() - processStart) + "ms");
+
+            // Send RESULT|LENGTH\n<raw bytes>
             writeLine(rawOut, "RESULT|" + resultBytes.length);
             rawOut.write(resultBytes);
             rawOut.flush();
@@ -215,15 +193,14 @@ public abstract class ServiceNode {
             System.out.println("[" + nodeId + "] Result sent (" + formatSize(resultBytes.length) + ")");
 
         } catch (EOFException e) {
-            System.err.println("[" + nodeId + "] Connection dropped mid-transfer");
+            System.err.println("[" + nodeId + "] Connection dropped mid-transfer: " + e.getMessage());
         } catch (SocketTimeoutException e) {
-            System.err.println("[" + nodeId + "] Socket timed out waiting for data");
+            System.err.println("[" + nodeId + "] Socket timed out");
         } catch (Exception e) {
-            System.err.println("[" + nodeId + "] Task error: " + e.getMessage());
-            // Try to send error back to server
+            System.err.println("[" + nodeId + "] Task error: "
+                + e.getClass().getSimpleName() + ": " + e.getMessage());
             try {
-                writeLine(conn.getOutputStream(), "ERROR|" + e.getMessage());
-                conn.getOutputStream().flush();
+                writeLine(new DataOutputStream(conn.getOutputStream()), "ERROR|" + e.getMessage());
             } catch (IOException ignored) {}
         } finally {
             try { conn.close(); } catch (IOException ignored) {}
@@ -231,14 +208,14 @@ public abstract class ServiceNode {
     }
 
     // =========================================================================
-    // UTILITIES
+    // UTILITIES — all use DataInputStream/DataOutputStream
     // =========================================================================
 
     /**
-     * Reads a line from a raw InputStream one byte at a time.
-     * Returns null if the stream is closed before any data is read.
+     * Read a line from DataInputStream one byte at a time.
+     * Strips \r, stops at \n. Returns null if stream closed.
      */
-    static String readLine(InputStream in) throws IOException {
+    static String readLine(DataInputStream in) throws IOException {
         ByteArrayOutputStream line = new ByteArrayOutputStream();
         int b;
         while ((b = in.read()) != -1) {
@@ -250,34 +227,16 @@ public abstract class ServiceNode {
     }
 
     /**
-     * Writes a line to a raw OutputStream followed by a newline character.
+     * Write a string followed by \n to a DataOutputStream.
      */
-    static void writeLine(OutputStream out, String s) throws IOException {
+    static void writeLine(DataOutputStream out, String s) throws IOException {
         out.write((s + "\n").getBytes("UTF-8"));
+        out.flush();
     }
 
-    /**
-     * Streams exactly length bytes from in to out in 64KB chunks.
-     * Never loads the full data into memory.
-     */
-    static void streamBytes(InputStream in, OutputStream out, long length) throws IOException {
-        byte[] buf = new byte[64 * 1024];
-        long remaining = length;
-        while (remaining > 0) {
-            int toRead = (int) Math.min(buf.length, remaining);
-            int read   = in.read(buf, 0, toRead);
-            if (read == -1) throw new EOFException("Stream ended early");
-            out.write(buf, 0, read);
-            remaining -= read;
-        }
-    }
-
-    /**
-     * Formats a byte count into a human readable string.
-     */
     static String formatSize(long b) {
-        if (b < 1024)           return b + " B";
-        if (b < 1024 * 1024)    return String.format("%.1f KB", b / 1024.0);
-        return                         String.format("%.1f MB", b / 1024.0 / 1024.0);
+        if (b < 1024)        return b + " B";
+        if (b < 1024 * 1024) return String.format("%.1f KB", b / 1024.0);
+        return                      String.format("%.1f MB", b / 1024.0 / 1024.0);
     }
 }
