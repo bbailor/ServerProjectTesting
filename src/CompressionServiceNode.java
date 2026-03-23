@@ -14,7 +14,7 @@ import java.util.zip.GZIPOutputStream;
  *
  * Run:
  *   javac ServiceNode.java CompressionServiceNode.java
- *   java -Xmx1024m CompressionServiceNode <serverIp> <myTcpPort>
+ *   java CompressionServiceNode <serverIp> <myTcpPort>
  */
 public class CompressionServiceNode extends ServiceNode {
 
