@@ -28,6 +28,9 @@ public class Server {
     // access it without explicit locking
     static final ConcurrentHashMap<String, NodeInfo> registry = new ConcurrentHashMap<>();
 
+    //Max threads
+    static final ExecutorService clientPool = Executors.newFixedThreadPool(10);
+
     public static void main(String[] args) throws Exception {
         System.out.println("[Server] Starting...");
 
@@ -50,10 +53,7 @@ public class Server {
                 System.out.println("[Server] New client connected: " + clientSocket.getInetAddress());
 
                 // Spawn a client-thread and go back to accepting
-                Thread clientThread = new Thread(
-                    new ClientHandler(clientSocket), "ClientThread-" + clientSocket.getPort()
-                );
-                clientThread.start();
+                clientPool.submit(new ClientHandler(clientSocket));
             }
         }
     }

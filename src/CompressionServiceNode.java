@@ -2,6 +2,7 @@ import java.io.*;
 import java.net.*;
 import java.util.Base64;
 import java.util.Random;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -22,6 +23,9 @@ public class CompressionServiceNode {
     static int    myTcpPort;
     static String serviceName;
     static String nodeId;
+
+    //max threads open to stop crashes
+    static final ExecutorService threadPool = Executors.newFixedThreadPool(10);
 
     static final Random random = new Random();
 
@@ -113,8 +117,7 @@ public class CompressionServiceNode {
                 System.out.println("[" + nodeId + "] Task connection from: " + conn.getInetAddress());
 
                 // Handle each task in its own thread so we don't block
-                Thread t = new Thread(() -> handleTask(conn), "TaskHandler");
-                t.start();
+                threadPool.submit(() -> handleTask(conn));
             }
         }
     }
