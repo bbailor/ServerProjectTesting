@@ -139,28 +139,33 @@ public class Server {
             String clientAddr = socket.getInetAddress().getHostAddress();
             System.out.println("[ClientThread] Handling client: " + clientAddr);
 
-            try (
-                BufferedReader in  = new BufferedReader(new InputStreamReader(socket.getInputStream()));
-                PrintWriter    out = new PrintWriter(socket.getOutputStream(), true)
-            ) {
+            try {
+                socket.setSoTimeout(600_000);
+                socket.setTcpNoDelay(true);
+
+                InputStream  rawIn  = socket.getInputStream();
+                OutputStream rawOut = socket.getOutputStream();
+
                 String line;
-                while ((line = in.readLine()) != null) {
+                while ((line = readLine(rawIn)) != null) {
                     line = line.trim();
-                    String logLine = line.length() > 100 ? line.substring(0, 100) + "...[shortened]" : line;
+                    if (line.isEmpty()) continue;
+
+                    String logLine = line.length() > 100
+                        ? line.substring(0, 100) + "...[shortened]" : line;
                     System.out.println("[ClientThread] From client: " + logLine);
 
                     if (line.equals("LIST")) {
-                        // Send back all currently alive services
-                        handleList(out);
-
+                        handleList(rawOut);
                     } else if (line.startsWith("REQUEST|")) {
-                        // REQUEST|<serviceName>|<input>
-                        handleRequest(line, out);
-
+                        handleRequest(line, rawIn, rawOut);
                     } else {
-                        out.println("ERROR|Unknown command: " + line);
+                        writeLine(rawOut, "ERROR|Unknown command: " + line);
+                        rawOut.flush();
                     }
                 }
+            } catch (SocketTimeoutException e) {
+                System.out.println("[ClientThread] Client timed out: " + clientAddr);
             } catch (Exception e) {
                 System.err.println("[ClientThread] Error: " + e.getMessage());
             } finally {
@@ -169,71 +174,113 @@ public class Server {
             }
         }
 
-        void handleList(PrintWriter out) {
+        void handleList(OutputStream out) throws IOException {
             if (registry.isEmpty()) {
-                out.println("ERROR|No services currently available");
-                return;
+                writeLine(out, "ERROR|No services currently available");
+            } else {
+                String services = String.join(",", registry.keySet());
+                writeLine(out, "SERVICES|" + services);
+                System.out.println("[ClientThread] Sent service list: " + services);
             }
-            // Build response like: SERVICES|BASE64,CSV,HMAC
-            String services = String.join(",", registry.keySet());
-            out.println("SERVICES|" + services);
-            System.out.println("[ClientThread] Sent service list: " + services);
+            out.flush();
         }
 
-        void handleRequest(String line, PrintWriter out) {
-            // Parse:  REQUEST|BASE64|hello world
+        void handleRequest(String line, InputStream clientIn, OutputStream clientOut) throws IOException {
             String[] parts = line.split("\\|", 3);
             if (parts.length < 3) {
-                out.println("ERROR|Malformed request. Use: REQUEST|SERVICE|input");
+                writeLine(clientOut, "ERROR|Malformed request. Use: REQUEST|SERVICE|LENGTH");
+                clientOut.flush();
                 return;
             }
 
             String serviceName = parts[1].toUpperCase();
-            String input       = parts[2];
+
+            // Determine if length-prefixed or legacy text request
+            long dataLen;
+            byte[] legacyBytes = null;
+            try {
+                dataLen = Long.parseLong(parts[2].trim());
+            } catch (NumberFormatException e) {
+                legacyBytes = parts[2].getBytes("UTF-8");
+                dataLen = legacyBytes.length;
+            }
 
             // Look up which SN offers this service
             NodeInfo node = registry.get(serviceName);
             if (node == null) {
-                out.println("ERROR|Service not available: " + serviceName);
+                if (legacyBytes == null) skipBytes(clientIn, dataLen);
+                writeLine(clientOut, "ERROR|Service not available: " + serviceName);
+                clientOut.flush();
                 return;
             }
 
-            // Check the node hasn't gone stale since last heartbeat
+            // Check the node hasn't gone stale
             if (System.currentTimeMillis() - node.lastSeen > NODE_TIMEOUT_MS) {
                 registry.remove(serviceName);
-                out.println("ERROR|Service node timed out: " + serviceName);
+                if (legacyBytes == null) skipBytes(clientIn, dataLen);
+                writeLine(clientOut, "ERROR|Service node timed out: " + serviceName);
+                clientOut.flush();
                 return;
             }
 
-            System.out.println("[ClientThread] Forwarding to SN at " + node.ip + ":" + node.tcpPort);
+            System.out.println("[ClientThread] Forwarding " + dataLen + " bytes to SN at "
+                + node.ip + ":" + node.tcpPort);
 
-            // Forward to the Service Node over TCP
-            try (
-                Socket snSocket = new Socket(node.ip, node.tcpPort);
-                PrintWriter snOut = new PrintWriter(snSocket.getOutputStream(), true);
-                BufferedReader snIn = new BufferedReader(new InputStreamReader(snSocket.getInputStream()))
-            ) {
-                snSocket.setSoTimeout(10_000); // 10 second timeout waiting for SN
+            try (Socket snSocket = new Socket()) {
+                snSocket.connect(new InetSocketAddress(node.ip, node.tcpPort), 10_000);
+                snSocket.setSoTimeout(600_000);
+                snSocket.setTcpNoDelay(true);
 
-                // Send request to SN:  TASK|<input>
-                snOut.println("TASK|" + input);
+                InputStream  snIn  = snSocket.getInputStream();
+                OutputStream snOut = snSocket.getOutputStream();
 
-                // Wait for result from SN:  RESULT|<output>
-                String snResponse = snIn.readLine();
-                String logResponse = snResponse != null && snResponse.length() > 100 ? snResponse.substring(0, 100) + "...[shortened]" : snResponse;
-                System.out.println("[ClientThread] SN responded: " + logResponse);
+                // Send TASK|LENGTH to SN
+                writeLine(snOut, "TASK|" + dataLen);
+                snOut.flush();
 
-                // Forward result back to the client
-                out.println(snResponse);
+                // Stream bytes to SN
+                if (legacyBytes != null) {
+                    snOut.write(legacyBytes);
+                } else {
+                    streamBytes(clientIn, snOut, dataLen);
+                }
+                snOut.flush();
+
+                // Read RESULT|LENGTH back from SN
+                String snHeader = readLine(snIn);
+                if (snHeader == null || snHeader.startsWith("ERROR|")) {
+                    writeLine(clientOut, snHeader != null ? snHeader : "ERROR|No response from service node");
+                    clientOut.flush();
+                    return;
+                }
+
+                if (!snHeader.startsWith("RESULT|")) {
+                    writeLine(clientOut, "ERROR|Unexpected SN response: " + snHeader);
+                    clientOut.flush();
+                    return;
+                }
+
+                long resultLen = Long.parseLong(snHeader.split("\\|")[1]);
+
+                // Forward RESULT|LENGTH to client then stream result bytes
+                writeLine(clientOut, "RESULT|" + resultLen);
+                clientOut.flush();
+                streamBytes(snIn, clientOut, resultLen);
+                clientOut.flush();
+
+                System.out.println("[ClientThread] Forwarded " + resultLen + " bytes back to client");
 
             } catch (SocketTimeoutException e) {
-                out.println("ERROR|Service node timed out during execution");
-                registry.remove(serviceName); // consider it dead
+                writeLine(clientOut, "ERROR|Service node timed out during execution");
+                clientOut.flush();
+                registry.remove(serviceName);
             } catch (ConnectException e) {
-                out.println("ERROR|Could not connect to service node");
+                writeLine(clientOut, "ERROR|Could not connect to service node");
+                clientOut.flush();
                 registry.remove(serviceName);
             } catch (Exception e) {
-                out.println("ERROR|" + e.getMessage());
+                writeLine(clientOut, "ERROR|" + e.getMessage());
+                clientOut.flush();
             }
         }
     }
@@ -246,7 +293,7 @@ public class Server {
         String ip;
         int    tcpPort;
         String service;
-        long   lastSeen; // System.currentTimeMillis() when last heartbeat arrived
+        long   lastSeen;
 
         NodeInfo(String nodeId, String ip, int tcpPort, String service) {
             this.nodeId   = nodeId;
@@ -259,6 +306,46 @@ public class Server {
         @Override
         public String toString() {
             return nodeId + " @ " + ip + ":" + tcpPort + " [" + service + "]";
+        }
+    }
+
+    // NEW stream meathods that can be used by both client and SN threads to read/write lines and stream data.
+
+    static String readLine(InputStream in) throws IOException {
+        ByteArrayOutputStream line = new ByteArrayOutputStream();
+        int b;
+        while ((b = in.read()) != -1) {
+            if (b == '\n') break;
+            if (b != '\r') line.write(b);
+        }
+        if (b == -1 && line.size() == 0) return null;
+        return line.toString("UTF-8");
+    }
+
+    static void writeLine(OutputStream out, String s) throws IOException {
+        out.write((s + "\n").getBytes("UTF-8"));
+    }
+
+    static void streamBytes(InputStream in, OutputStream out, long length) throws IOException {
+        byte[] buf = new byte[64 * 1024];
+        long remaining = length;
+        while (remaining > 0) {
+            int toRead = (int) Math.min(buf.length, remaining);
+            int read = in.read(buf, 0, toRead);
+            if (read == -1) throw new EOFException("Stream ended early");
+            out.write(buf, 0, read);
+            remaining -= read;
+        }
+    }
+
+    static void skipBytes(InputStream in, long length) throws IOException {
+        byte[] buf = new byte[64 * 1024];
+        long remaining = length;
+        while (remaining > 0) {
+            int toRead = (int) Math.min(buf.length, remaining);
+            int read = in.read(buf, 0, toRead);
+            if (read == -1) break;
+            remaining -= read;
         }
     }
 }
